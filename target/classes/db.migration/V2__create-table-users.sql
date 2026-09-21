@@ -5,5 +5,3 @@ CREATE TABLE users (
     role text not null
 );
 
-INSERT INTO users (id, login, password, role)
-VALUES ('user_001', 'devchicala', '123456789', 'ADMIN');
