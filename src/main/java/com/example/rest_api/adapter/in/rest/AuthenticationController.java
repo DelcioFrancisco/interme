@@ -1,8 +1,10 @@
 package com.example.rest_api.adapter.in.rest;
 
 import com.example.rest_api.adapter.out.repository.UserRepository;
+import com.example.rest_api.domain.service.OAuthService;
 import com.example.rest_api.domain.user.AuthenticationDTO;
 import com.example.rest_api.domain.user.LoginResponseDTO;
+import com.example.rest_api.domain.user.OAuthResponse;
 import com.example.rest_api.domain.user.RegisterDTO;
 import com.example.rest_api.domain.user.User;
 import com.example.rest_api.config.security.TokenService;
@@ -14,6 +16,8 @@ import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.web.bind.annotation.*;
+
+import java.util.Map;
 
 
 @RestController
@@ -53,44 +57,38 @@ public class AuthenticationController {
         return ResponseEntity.ok().build();
     }
 
-    @GetMapping("/grantcode")
-    public String grantCode(@RequestParam("code") String code, @RequestParam("scope") String scope, @RequestParam("authuser") String authuser, @RequestParam("prompt") String prompt) {
-        log.info("Grant code request received");
-        return getOauthAccessTokenGoogle(code);
-    }
+    @RequestMapping("/auth/oauth2")
+    public class OAuth2Controller {
 
-    private String getOauthAccessTokenGoogle(String code) {
-        RestTemplate restTemplate = new RestTemplate();
-        HttpHeaders httpHeaders = new HttpHeaders();
-        httpHeaders.setContentType(MediaType.APPLICATION_FORM_URLENCODED);
+        private final OAuthService oAuthService;
+        private final User userService;
+        private final TokenService tokenService;
 
-        MultiValueMap<String, String> params = new LinkedMultiValueMap<>();
-        params.add("code", code);
-        params.add("redirect_uri", "http://localhost:8080/grantcode");
-        params.add("client_id", clientId);
-        params.add("client_secret", clientSecret);
-        params.add("scope", "https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fuserinfo.profile");
-        params.add("scope", "https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fuserinfo.email");
-        params.add("scope", "openid");
-        params.add("grant_type", "authorization_code");
+        public OAuth2Controller(OAuthService oAuthService, User userService, TokenService tokenService) {
+            this.oAuthService = oAuthService;
+            this.userService = userService;
+            this.tokenService = tokenService;
+        }
 
-        HttpEntity<MultiValueMap<String, String>> requestEntity = new HttpEntity<>(params, httpHeaders);
+        @PostMapping("/google")
+        public ResponseEntity<OAuthResponse> googleLogin(@RequestBody Map<String, String> body) {
+            String code = body.get("code");
 
-        String url = "https://oauth2.googleapis.com/token";
-        String response = restTemplate.postForObject(url, requestEntity, String.class);
-        return response;
-    }
+            // Step 1: Exchange code for access token
+            var tokenResponse = oAuthService.exchangeCodeForTokens(code);
+            String accessToken = tokenResponse.accessToken();
 
-    private void getProfileDetailsGoogle(String accessToken) {
-        RestTemplate restTemplate = new RestTemplate();
-        HttpHeaders httpHeaders = new HttpHeaders();
-        httpHeaders.setBearerAuth(accessToken);
+            // Step 2: Fetch user info from Google
+            var userInfo = oAuthService.getUserInfo(accessToken);
 
-        HttpEntity<String> requestEntity = new HttpEntity<>(httpHeaders);
+            // Step 3: Check if user exists or create a new one
+            User user = userService;
 
-        String url = "https://www.googleapis.com/oauth2/v2/userinfo";
-        ResponseEntity<String> response = restTemplate.exchange(url, HttpMethod.GET, requestEntity, String.class);
-        JsonObject jsonObject = new Gson().fromJson(response.getBody(), JsonObject.class);
+            // Step 4: Generate JWT for authenticated user
+            String jwt = tokenService.generateToken(user);
+
+            return ResponseEntity.ok(new OAuthResponse(jwt));
+        }
     }
 }
 
